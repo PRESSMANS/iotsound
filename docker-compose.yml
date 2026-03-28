@@ -4,9 +4,6 @@ volumes:
   spotifycache:
 
 services:
-  # Core services
-  # -- Required for a fully featured installation of IoTSound
-  # -- Mutiroom services can be removed if not using multiroom mode
   audio:
     build: ./core/audio
     privileged: true
@@ -36,9 +33,6 @@ services:
     build: ./core/multiroom/client
     restart: on-failure
 
-  # Plugins
-  # -- Additional plugins can be added.
-  # -- Remove unwanted plugins as needed
   bluetooth:
     build: ./plugins/bluetooth
     restart: on-failure
@@ -64,7 +58,6 @@ services:
     volumes:
       - spotifycache:/var/cache/raspotify
 
-  # https://github.com/balenablocks/hostname
   hostname:
     build: ./core/hostname
     restart: no
@@ -73,7 +66,7 @@ services:
     environment:
       SET_HOSTNAME: balena
 
-pirate-ui:
+  pirate-ui:
     build: ./pirate-ui
     privileged: true
     network_mode: host
