@@ -8,15 +8,22 @@ MOUNT_POINT="/music"
 
 echo "--- MPD Container Starting ---"
 
-# 必要なディレクトリを作成（MPD起動前に確実に）
+# 必要なディレクトリを作成
 mkdir -p "$MOUNT_POINT"
 mkdir -p /var/lib/mpd
 mkdir -p /var/log/mpd
 mkdir -p /run/mpd
-touch /var/lib/mpd/database
-touch /var/lib/mpd/state
 
-# SMBマウント（リトライあり）
+# DBファイルが壊れていたら削除
+if [ -f /var/lib/mpd/database ] && ! mpd --check-config /etc/mpd.conf 2>/dev/null; then
+    rm -f /var/lib/mpd/database /var/lib/mpd/state
+fi
+# 空ファイルだった場合も削除
+if [ -f /var/lib/mpd/database ] && [ ! -s /var/lib/mpd/database ]; then
+    rm -f /var/lib/mpd/database
+fi
+
+# SMBマウント
 mount_smb() {
     echo "Mounting SMB: $SMB_HOST -> $MOUNT_POINT"
     mount -t cifs "$SMB_HOST" "$MOUNT_POINT" \
@@ -34,7 +41,7 @@ echo "Starting MPD..."
 mpd /etc/mpd.conf
 sleep 5
 
-# DB更新・全曲追加・ループ再生開始
+# DB更新・全曲追加・ループ再生
 echo "Updating music database..."
 mpc -p 6600 update --wait
 
