@@ -1,4 +1,24 @@
-FROM andrewn/librespot:0.4.2-pulseaudio
+FROM balenalib/armv7hf-debian:bullseye as builder
+
+RUN install_packages \
+    curl \
+    build-essential \
+    libasound2-dev \
+    libpulse-dev \
+    pkg-config
+
+RUN curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+RUN cargo install librespot \
+    --no-default-features \
+    --features pulseaudio-backend
+
+FROM balenalib/armv7hf-debian:bullseye
+
+RUN install_packages libpulse0
+
+COPY --from=builder /root/.cargo/bin/librespot /usr/bin/librespot
 
 ENV PULSE_SERVER=tcp:localhost:4317
 
