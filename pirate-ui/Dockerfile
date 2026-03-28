@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir \
+    numpy \
     "pillow>=10.0.0" \
     st7789==0.0.4 \
     RPi.GPIO \
