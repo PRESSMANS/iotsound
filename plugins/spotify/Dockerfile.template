@@ -7,7 +7,9 @@ RUN install_packages \
     libpulse-dev \
     pkg-config \
     git \
-    cmake
+    cmake \
+    clang \
+    libclang-dev
 
 RUN curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable
 ENV PATH="/root/.cargo/bin:${PATH}"
@@ -15,6 +17,9 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 RUN git clone --depth 1 --branch v0.5.0 https://github.com/librespot-org/librespot.git /build/librespot
 
 WORKDIR /build/librespot
+
+# aws-lc-rs の代わりに ring を使う
+ENV AWS_LC_SYS_NO_ASM=1
 
 RUN cargo build --release \
     --no-default-features \
