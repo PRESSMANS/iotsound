@@ -2,6 +2,7 @@ FROM python:3.11-slim-bullseye
 
 RUN apt-get update && apt-get install -y \
     gcc \
+    g++ \
     python3-dev \
     libgpiod2 \
     fonts-dejavu-core \
@@ -11,7 +12,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir \
-    numpy \
+    "numpy<2.0" \
     "pillow>=10.0.0" \
     st7789==0.0.4 \
     RPi.GPIO \
