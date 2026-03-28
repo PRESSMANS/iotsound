@@ -72,3 +72,12 @@ services:
       io.balena.features.supervisor-api: 1
     environment:
       SET_HOSTNAME: balena
+
+pirate-ui:
+    build: ./pirate-ui
+    privileged: true
+    network_mode: host
+    restart: on-failure
+    environment:
+      - SERVER_HOST=master1.local
+      - DEVICE_NAME=satelite01
