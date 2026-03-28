@@ -1,16 +1,20 @@
 #!/bin/bash
 set -e
 
-SMB_HOST="${SMB_HOST:-//10.0.10.7/music}"
+SMB_HOST="${SMB_HOST:-//10.0.10.7/Syno-music}"
 SMB_USER="${SMB_USER:-music}"
 SMB_PASS="${SMB_PASS:-}"
 MOUNT_POINT="/music"
 
 echo "--- MPD Container Starting ---"
 
-# 必要なディレクトリを作成
+# 必要なディレクトリを作成（MPD起動前に確実に）
 mkdir -p "$MOUNT_POINT"
-mkdir -p /var/lib/mpd /var/log/mpd /run/mpd
+mkdir -p /var/lib/mpd
+mkdir -p /var/log/mpd
+mkdir -p /run/mpd
+touch /var/lib/mpd/database
+touch /var/lib/mpd/state
 
 # SMBマウント（リトライあり）
 mount_smb() {
@@ -21,7 +25,6 @@ mount_smb() {
         || { echo "SMB mount failed, retrying in 10s..."; return 1; }
 }
 
-# マウントが成功するまでリトライ
 until mount_smb; do
     sleep 10
 done
@@ -41,29 +44,24 @@ mpc -p 6600 listall | mpc -p 6600 add
 TOTAL=$(mpc -p 6600 playlist | wc -l)
 echo "Total tracks: $TOTAL"
 
-# リピート・ランダムOFF（順番通り再生）でループ
 mpc -p 6600 repeat on
 mpc -p 6600 random off
 mpc -p 6600 play
 echo "Playback started."
 
-# ファイル変更を監視して自動更新
 echo "Watching for file changes..."
 inotifywait -m -r \
     -e create -e delete -e moved_to -e moved_from -e close_write \
     "$MOUNT_POINT" 2>/dev/null |
 while read -r directory event filename; do
-    # m4a/flac/mp3のみ対象
     case "${filename,,}" in
         *.m4a|*.flac|*.mp3)
             echo "File changed: $event $directory$filename"
-            sleep 3  # 連続イベントをまとめる
-            echo "Updating database..."
+            sleep 3
             mpc -p 6600 update --wait
             mpc -p 6600 clear
             mpc -p 6600 listall | mpc -p 6600 add
-            CURRENT_POS=$(mpc -p 6600 | grep -oP '#\K[0-9]+' | head -1 || echo "1")
-            mpc -p 6600 play "$CURRENT_POS"
+            mpc -p 6600 play 1
             echo "Playlist updated. Total: $(mpc -p 6600 playlist | wc -l) tracks"
             ;;
     esac
