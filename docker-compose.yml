@@ -80,7 +80,7 @@ services:
     network_mode: host
     restart: on-failure
     environment:
-      - SMB_HOST=//10.0.10.7/music
+      - SMB_HOST=//10.0.10.7/Syno-music/BBC
       - SMB_USER=music
       - SMB_PASS=Kuh07210721
-      - PULSE_SERVER=tcp:localhost:4317
+      - PULSE_SERVER=tcp:audio:4317
