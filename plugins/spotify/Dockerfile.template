@@ -18,8 +18,10 @@ RUN git clone --depth 1 --branch v0.5.0 https://github.com/librespot-org/libresp
 
 WORKDIR /build/librespot
 
-# aws-lc-rs の代わりに ring を使う
-ENV AWS_LC_SYS_NO_ASM=1
+# rustls の aws-lc-rs を ring に差し替える
+RUN sed -i 's/aws-lc-rs/ring/g' Cargo.toml && \
+    sed -i 's/aws-lc-rs/ring/g' core/Cargo.toml 2>/dev/null || true && \
+    cargo update -p aws-lc-rs --precise 0.0.0 2>/dev/null || true
 
 RUN cargo build --release \
     --no-default-features \
