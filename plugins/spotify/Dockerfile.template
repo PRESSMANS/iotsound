@@ -18,12 +18,15 @@ RUN git clone --depth 1 --branch v0.5.0 https://github.com/librespot-org/libresp
 
 WORKDIR /build/librespot
 
+# 利用可能なフィーチャーを確認してからビルド
+RUN cat Cargo.toml | grep -A 50 '\[features\]'
+
 RUN sed -i 's/aws-lc-rs/ring/g' Cargo.toml && \
     sed -i 's/aws-lc-rs/ring/g' core/Cargo.toml 2>/dev/null || true
 
 RUN cargo build --release \
     --no-default-features \
-    --features pulseaudio-backend,with-tremor
+    --features pulseaudio-backend
 
 FROM balenalib/armv7hf-debian:bullseye
 
