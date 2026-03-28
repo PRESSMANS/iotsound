@@ -1,16 +1,17 @@
 FROM python:3.11-slim-bullseye
 
-# システムパッケージ
 RUN apt-get update && apt-get install -y \
     gcc \
     python3-dev \
     libgpiod2 \
     fonts-dejavu-core \
+    libjpeg-dev \
+    zlib1g-dev \
+    libfreetype6-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Pythonパッケージ
 RUN pip install --no-cache-dir \
-    pillow \
+    "pillow>=10.0.0" \
     st7789==0.0.4 \
     RPi.GPIO \
     requests
