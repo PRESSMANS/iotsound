@@ -74,3 +74,13 @@ services:
     environment:
       - SERVER_HOST=master1.local
       - DEVICE_NAME=satelite01
+  mpd:
+    build: ./mpd
+    privileged: true
+    network_mode: host
+    restart: on-failure
+    environment:
+      - SMB_HOST=//10.0.10.7/music
+      - SMB_USER=music
+      - SMB_PASS=Kuh07210721
+      - PULSE_SERVER=tcp:localhost:4317
