@@ -11,6 +11,7 @@ RUN curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable
 ENV PATH="/root/.cargo/bin:${PATH}"
 
 RUN cargo install librespot \
+    --version 0.5.0 \
     --no-default-features \
     --features pulseaudio-backend
 
