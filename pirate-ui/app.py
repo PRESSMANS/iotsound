@@ -3,7 +3,7 @@
 Pirate Audio Line-out 接続状態表示
 - ST7789 240x240 ディスプレイに接続状態を表示
 - Snapcast JSON-RPC API (port 1780) でサーバー接続状態を取得
-- 下部にスクロールテキストを表示
+- 下部に「Powered by PRESSMANS」を右寄せ表示（PRESSMANSは太字）
 """
 
 import ST7789
@@ -14,7 +14,6 @@ import socket
 import time
 import os
 import logging
-import threading
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
 log = logging.getLogger(__name__)
@@ -23,8 +22,6 @@ log = logging.getLogger(__name__)
 SERVER_HOST   = os.getenv('SERVER_HOST',   'master1.local')
 DEVICE_NAME   = os.getenv('DEVICE_NAME',   'satelite01')
 POLL_INTERVAL = int(os.getenv('POLL_INTERVAL', '5'))
-SCROLL_TEXT   = os.getenv('SCROLL_TEXT',   'Powered by PRESSMANS')
-SCROLL_SPEED  = int(os.getenv('SCROLL_SPEED', '3'))   # ピクセル/フレーム
 
 # --- ディスプレイ初期化 ---
 disp = ST7789.ST7789(
@@ -37,18 +34,18 @@ disp = ST7789.ST7789(
 )
 W, H = disp.width, disp.height   # 240 x 240
 
-SCROLL_H  = 22              # スクロール行の高さ
-CONTENT_H = H - SCROLL_H   # コンテンツエリアの高さ
+FOOTER_H  = 22
+CONTENT_H = H - FOOTER_H
 
 # --- フォント ---
 try:
     FONT_L  = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf', 22)
     FONT_M  = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 18)
     FONT_S  = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 14)
-    FONT_SC = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 14)
+    FONT_SB = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf', 14)
 except IOError:
     FONT_L = ImageFont.load_default()
-    FONT_M = FONT_SC = FONT_S = FONT_L
+    FONT_M = FONT_S = FONT_SB = FONT_L
 
 # --- カラー定義 ---
 BLACK     = (0,   0,   0)
@@ -58,18 +55,8 @@ RED       = (220, 50,  50)
 GRAY      = (160, 160, 160)
 CYAN      = (80,  200, 255)
 YELLOW    = (255, 220, 0)
-SCROLL_BG = (20,  20,  50)
-SCROLL_FG = (255, 200, 50)
-
-# --- 共有状態 ---
-current_status = {
-    'server_reachable': False,
-    'self_connected': False,
-    'client_count': 0,
-    'volume': None,
-}
-current_ip  = 'no network'
-status_lock = threading.Lock()
+FOOTER_BG = (20,  20,  50)
+FOOTER_FG = (255, 200, 50)
 
 
 def get_local_ip() -> str:
@@ -120,18 +107,18 @@ def get_snapcast_status() -> dict:
     return result
 
 
-def draw_content(status: dict, ip: str) -> Image.Image:
-    """コンテンツエリア（スクロール行を除く上部）を描画"""
-    img  = Image.new('RGB', (W, CONTENT_H), BLACK)
+def draw_screen(status: dict, ip: str):
+    """ディスプレイに状態を描画"""
+    img  = Image.new('RGB', (W, H), BLACK)
     draw = ImageDraw.Draw(img)
 
-    # ヘッダー
+    # ---- ヘッダー ----
     draw.rectangle([(0, 0), (W, 34)], fill=(30, 30, 60))
     draw.text((8, 6), DEVICE_NAME, font=FONT_L, fill=WHITE)
 
     y = 44
 
-    # サーバー到達性
+    # ---- サーバー到達性 ----
     if status['server_reachable']:
         dot_color, label = GREEN, 'Server: OK'
     else:
@@ -141,7 +128,7 @@ def draw_content(status: dict, ip: str) -> Image.Image:
     draw.text((30, y), label, font=FONT_M, fill=dot_color)
     y += 28
 
-    # 接続状態
+    # ---- 接続状態 ----
     if status['server_reachable']:
         if status['self_connected']:
             sc, sl = GREEN, 'Connected'
@@ -151,11 +138,11 @@ def draw_content(status: dict, ip: str) -> Image.Image:
         draw.text((30, y), sl, font=FONT_M, fill=sc)
     y += 28
 
-    # クライアント数
+    # ---- クライアント数 ----
     draw.text((8, y), f'Clients: {status["client_count"]}', font=FONT_M, fill=GRAY)
     y += 28
 
-    # 音量バー
+    # ---- 音量バー ----
     vol = status['volume']
     if vol is not None:
         bar_w = int((W - 16) * vol / 100)
@@ -166,37 +153,27 @@ def draw_content(status: dict, ip: str) -> Image.Image:
         y += 18
     y += 4
 
-    # サーバーホスト・IP
+    # ---- サーバーホスト・IP ----
     draw.text((8, y), f'{SERVER_HOST}', font=FONT_S, fill=GRAY)
     y += 20
     draw.text((8, y), f'IP: {ip}', font=FONT_S, fill=CYAN)
 
-    return img
+    # ---- フッター: Powered by PRESSMANS（右寄せ） ----
+    draw.rectangle([(0, CONTENT_H), (W, H)], fill=FOOTER_BG)
 
+    # "Powered by " と "PRESSMANS" を別々に描画して右寄せ
+    text1 = 'Powered by '
+    text2 = 'PRESSMANS'
+    bbox1 = draw.textbbox((0, 0), text1, font=FONT_S)
+    bbox2 = draw.textbbox((0, 0), text2, font=FONT_SB)
+    total_w = (bbox1[2] - bbox1[0]) + (bbox2[2] - bbox2[0])
+    x_start = W - total_w - 8   # 右端から8px余白
 
-def draw_scroll_bar(offset: int, unit_width: int) -> Image.Image:
-    """スクロールテキストバーを描画"""
-    padded = SCROLL_TEXT + '     ' + SCROLL_TEXT + '     '
-    img  = Image.new('RGB', (W, SCROLL_H), SCROLL_BG)
-    draw = ImageDraw.Draw(img)
-    draw.text((-offset, 4), padded, font=FONT_SC, fill=SCROLL_FG)
-    return img
+    fy = CONTENT_H + 4
+    draw.text((x_start, fy), text1, font=FONT_S,  fill=FOOTER_FG)
+    draw.text((x_start + (bbox1[2] - bbox1[0]), fy), text2, font=FONT_SB, fill=WHITE)
 
-
-def status_updater():
-    """別スレッドで定期的にステータスを更新"""
-    global current_status, current_ip
-    while True:
-        try:
-            s  = get_snapcast_status()
-            ip = get_local_ip()
-            with status_lock:
-                current_status = s
-                current_ip     = ip
-            log.info('status=%s ip=%s', s, ip)
-        except Exception as e:
-            log.error('Status update error: %s', e)
-        time.sleep(POLL_INTERVAL)
+    disp.display(img)
 
 
 def show_boot_screen():
@@ -213,36 +190,14 @@ if __name__ == '__main__':
     show_boot_screen()
     time.sleep(2)
 
-    # スクロールテキスト1ループ分の幅を計算
-    tmp_img  = Image.new('RGB', (2000, SCROLL_H))
-    tmp_draw = ImageDraw.Draw(tmp_img)
-    bbox = tmp_draw.textbbox((0, 0), SCROLL_TEXT + '     ', font=FONT_SC)
-    unit_width = bbox[2]
-
-    # ステータス更新スレッド起動
-    t = threading.Thread(target=status_updater, daemon=True)
-    t.start()
-
-    offset = 0
+    ip = get_local_ip()
 
     while True:
         try:
-            with status_lock:
-                s  = current_status.copy()
-                ip = current_ip
-
-            content_img = draw_content(s, ip)
-            scroll_img  = draw_scroll_bar(offset, unit_width)
-
-            full_img = Image.new('RGB', (W, H), BLACK)
-            full_img.paste(content_img, (0, 0))
-            full_img.paste(scroll_img,  (0, CONTENT_H))
-
-            disp.display(full_img)
-
-            offset = (offset + SCROLL_SPEED) % unit_width
-
+            status = get_snapcast_status()
+            ip = get_local_ip()
+            draw_screen(status, ip)
+            log.info('status=%s ip=%s', status, ip)
         except Exception as e:
-            log.error('Display error: %s', e)
-
-        time.sleep(0.05)   # 約20fps
+            log.error('Unexpected error: %s', e)
+        time.sleep(POLL_INTERVAL)
