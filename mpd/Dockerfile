@@ -7,6 +7,9 @@ RUN apt-get update && apt-get install -y \
     inotify-tools \
     libavcodec58 \
     libavformat58 \
+    rsync \
+    exfatprogs \
+    usbutils \
     && rm -rf /var/lib/apt/lists/*
 
 COPY mpd.conf /etc/mpd.conf
