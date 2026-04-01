@@ -45,6 +45,7 @@ set -- /usr/bin/librespot \
   --bitrate "$SOUND_SPOTIFY_BITRATE" \
   --cache /var/cache/raspotify \
   --volume-ctrl linear \
+  --autoplay \
   "$@"
 
 exec "$@"
