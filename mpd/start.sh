@@ -6,43 +6,21 @@ if [[ -n "$SOUND_DISABLE_MPD" ]]; then
   exit 0
 fi
 
-
-SMB_HOST="${SMB_HOST:-//10.0.10.7/Syno-music}"
-SMB_USER="${SMB_USER:-music}"
-SMB_PASS="${SMB_PASS:-}"
-MOUNT_POINT="/music"
 USB_MOUNT="/mnt/usb"
 USB_SRC_DIR="Music"
 USB_DST="/music/usb"
 
 echo "--- MPD Container Starting ---"
 
-mkdir -p "$MOUNT_POINT"
 mkdir -p "$USB_MOUNT"
 mkdir -p "$USB_DST"
 mkdir -p /var/lib/mpd
 mkdir -p /var/log/mpd
 mkdir -p /run/mpd
 
-if [ -f /var/lib/mpd/database ] && ! mpd --check-config /etc/mpd.conf 2>/dev/null; then
-    rm -f /var/lib/mpd/database /var/lib/mpd/state
-fi
 if [ -f /var/lib/mpd/database ] && [ ! -s /var/lib/mpd/database ]; then
     rm -f /var/lib/mpd/database
 fi
-
-# SMBマウント
-mount_smb() {
-    echo "Mounting SMB: $SMB_HOST -> $MOUNT_POINT"
-    mount -t cifs "$SMB_HOST" "$MOUNT_POINT" \
-        -o "username=$SMB_USER,password=$SMB_PASS,uid=0,gid=0,vers=3.0,iocharset=utf8" \
-        && echo "SMB mount successful" \
-        || { echo "SMB mount failed, retrying in 10s..."; return 1; }
-}
-
-until mount_smb; do
-    sleep 10
-done
 
 # USB同期関数
 sync_usb() {
@@ -63,7 +41,6 @@ sync_usb() {
 
     umount "$USB_MOUNT" && echo "USB unmounted safely"
 
-    # MPD ライブラリ更新
     mpc -p 6600 update --wait
     mpc -p 6600 clear
     mpc -p 6600 listall | mpc -p 6600 add
@@ -77,11 +54,10 @@ sync_usb() {
 usb_watch() {
     echo "Watching for USB devices..."
     while true; do
-        # /dev/sd* デバイスを監視
         inotifywait -e create /dev 2>/dev/null | while read -r dir event dev; do
             case "$dev" in
                 sd[a-z]1|sd[a-z])
-                    sleep 2  # デバイス安定待ち
+                    sleep 2
                     sync_usb "/dev/$dev"
                     ;;
             esac
@@ -90,12 +66,43 @@ usb_watch() {
     done
 }
 
+# mpd.conf 更新（USB のみ）
+cat > /etc/mpd.conf << 'MPDEOF'
+music_directory     "/music/usb"
+db_file             "/var/lib/mpd/database"
+log_file            "/var/log/mpd/mpd.log"
+pid_file            "/run/mpd/mpd.pid"
+state_file          "/var/lib/mpd/state"
+
+user                "root"
+bind_to_address     "0.0.0.0"
+port                "6600"
+
+auto_update         "yes"
+auto_update_depth   "0"
+
+decoder {
+    plugin          "ffmpeg"
+    enabled         "yes"
+}
+
+audio_output {
+    type            "pulse"
+    name            "balena-sound"
+    server          "localhost"
+    sink            "balena-sound.input"
+}
+
+input {
+    plugin          "curl"
+}
+MPDEOF
+
 # MPD起動
 echo "Starting MPD..."
 mpd /etc/mpd.conf
 sleep 5
 
-# DB更新・全曲追加・ループ再生
 echo "Updating music database..."
 mpc -p 6600 update --wait
 
@@ -107,27 +114,9 @@ echo "Total tracks: $TOTAL"
 
 mpc -p 6600 repeat on
 mpc -p 6600 random off
-mpc -p 6600 play
+[ "$TOTAL" -gt 0 ] && mpc -p 6600 play
 echo "Playback started."
 
-# USB監視をバックグラウンドで起動
 usb_watch &
 
-# SMBファイル変更監視
-echo "Watching for file changes..."
-inotifywait -m -r \
-    -e create -e delete -e moved_to -e moved_from -e close_write \
-    "$MOUNT_POINT" 2>/dev/null |
-while read -r directory event filename; do
-    case "${filename,,}" in
-        *.m4a|*.flac|*.mp3)
-            echo "File changed: $event $directory$filename"
-            sleep 3
-            mpc -p 6600 update --wait
-            mpc -p 6600 clear
-            mpc -p 6600 listall | mpc -p 6600 add
-            mpc -p 6600 play 1
-            echo "Playlist updated. Total: $(mpc -p 6600 playlist | wc -l) tracks"
-            ;;
-    esac
-done
+wait
