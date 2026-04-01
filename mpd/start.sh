@@ -1,6 +1,12 @@
 #!/bin/bash
 set -e
 
+if [[ -n "$SOUND_DISABLE_MPD" ]]; then
+  echo "MPD is disabled, exiting..."
+  exit 0
+fi
+
+
 SMB_HOST="${SMB_HOST:-//10.0.10.7/Syno-music}"
 SMB_USER="${SMB_USER:-music}"
 SMB_PASS="${SMB_PASS:-}"

@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -e
 
+if [[ -n "$SOUND_DISABLE_MULTIROOM_CLIENT" ]]; then
+  echo "Multiroom client is disabled, exiting..."
+  exit 0
+fi
+
+
 SOUND_SUPERVISOR_PORT=${SOUND_SUPERVISOR_PORT:-80}
 SOUND_SUPERVISOR="$(ip route | awk '/default / { print $3 }'):$SOUND_SUPERVISOR_PORT"
 # Wait for sound supervisor to start

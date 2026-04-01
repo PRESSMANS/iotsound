@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+import os, sys
+if os.environ.get("SOUND_DISABLE_PIRATE_UI"):
+    print("Pirate UI is disabled, exiting...")
+    sys.exit(0)
+
 """
 Pirate Audio Line-out 接続状態表示
 - ST7789 240x240 ディスプレイに接続状態を表示
