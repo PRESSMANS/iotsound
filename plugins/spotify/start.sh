@@ -46,6 +46,7 @@ set -- /usr/bin/librespot \
   --cache /var/cache/raspotify \
   --volume-ctrl linear \
   --autoplay \
+  --autoplay \
   "$@"
 
 exec "$@"
