@@ -74,6 +74,7 @@ services:
     environment:
       - SERVER_HOST=master1.local
       - DEVICE_NAME=satelite01
+      - TZ=Asia/Tokyo
   mpd:
     build: ./mpd
     privileged: true
