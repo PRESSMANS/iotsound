@@ -9,6 +9,7 @@ USB_MOUNT="/mnt/usb"
 USB_SRC_DIR="Music"
 USB_DST="/music/usb"
 SYNCED_DEV=""
+SYNCED_COUNT=0
 
 echo "--- MPD Container Starting ---"
 
@@ -19,19 +20,28 @@ mkdir -p "$USB_MOUNT" "$USB_DST" /var/lib/mpd /var/log/mpd /run/mpd
 sync_usb() {
     local dev="$1"
 
-    # パーティションデバイスのみ（sda1 など数字で終わるもの）
     [[ "$dev" =~ [0-9]$ ]] || { echo "Skipping non-partition: $dev"; return 1; }
 
-    # 同じデバイスは再同期しない
-    [ "$dev" = "$SYNCED_DEV" ] && { echo "Already synced: $dev"; return 0; }
-
-    echo "USB detected: $dev"
     mountpoint -q "$USB_MOUNT" && umount "$USB_MOUNT" 2>/dev/null || true
 
     mount -t exfat "$dev" "$USB_MOUNT" -o uid=0,gid=0 2>/dev/null \
         || mount "$dev" "$USB_MOUNT" 2>/dev/null \
         || { echo "USB mount failed for $dev"; return 1; }
-    echo "USB mounted"
+
+    # ファイル数をチェック
+    local current_count=0
+    if [ -d "$USB_MOUNT/$USB_SRC_DIR" ]; then
+        current_count=$(find "$USB_MOUNT/$USB_SRC_DIR" -type f \( -name "*.m4a" -o -name "*.mp3" -o -name "*.flac" \) | wc -l)
+    fi
+
+    # 同じデバイスかつファイル数も同じなら再同期しない
+    if [ "$dev" = "$SYNCED_DEV" ] && [ "$current_count" -eq "$SYNCED_COUNT" ]; then
+        echo "Already synced: $dev ($current_count files)"
+        umount "$USB_MOUNT" 2>/dev/null || true
+        return 0
+    fi
+
+    echo "USB detected: $dev (files: $current_count, prev: $SYNCED_COUNT)"
 
     if [ -d "$USB_MOUNT/$USB_SRC_DIR" ]; then
         echo "Syncing..."
@@ -44,6 +54,7 @@ sync_usb() {
 
     umount "$USB_MOUNT" 2>/dev/null || true
     SYNCED_DEV="$dev"
+    SYNCED_COUNT="$current_count"
 
     # 再生中でなければプレイリスト更新・再生開始
     STATUS=$(mpc -p 6600 status 2>/dev/null | grep -E '^\[' | awk '{print $1}')
@@ -57,9 +68,8 @@ sync_usb() {
         [ "$TOTAL" -gt 0 ] && mpc -p 6600 play || true
         echo "Playback started. Total: $TOTAL tracks"
     else
-        # 再生中はライブラリだけ更新
         mpc -p 6600 update || true
-        echo "Library updated while playing"
+        echo "Library updated while playing. Total files: $current_count"
     fi
 }
 
@@ -69,26 +79,23 @@ usb_watch() {
         for dev in /dev/sd?1; do
             [ -b "$dev" ] && sync_usb "$dev" && break
         done
-        # デバイスが消えたらリセット
         if [ -n "$SYNCED_DEV" ] && [ ! -b "$SYNCED_DEV" ]; then
             echo "USB removed: $SYNCED_DEV"
             SYNCED_DEV=""
+            SYNCED_COUNT=0
         fi
         sleep 10
     done
 }
 
-# MPD 起動
 echo "Starting MPD..."
 mpd /etc/mpd.conf || true
 sleep 5
 
-# 起動時 USB チェック
 for dev in /dev/sda1 /dev/sdb1; do
     [ -b "$dev" ] && { sync_usb "$dev"; break; }
 done
 
-# プレイリスト構築・再生
 echo "Building playlist..."
 mpc -p 6600 update --wait || true
 mpc -p 6600 clear || true
