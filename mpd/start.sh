@@ -53,7 +53,7 @@ sync_usb() {
         mpc -p 6600 listall | mpc -p 6600 add || true
         TOTAL=$(mpc -p 6600 playlist | wc -l)
         mpc -p 6600 repeat on || true
-        mpc -p 6600 random off || true
+        mpc -p 6600 random on || true
         [ "$TOTAL" -gt 0 ] && mpc -p 6600 play || true
         echo "Playback started. Total: $TOTAL tracks"
     else
@@ -96,7 +96,7 @@ mpc -p 6600 listall | mpc -p 6600 add || true
 TOTAL=$(mpc -p 6600 playlist | wc -l)
 echo "Total tracks: $TOTAL"
 mpc -p 6600 repeat on || true
-mpc -p 6600 random off || true
+mpc -p 6600 random on || true
 [ "$TOTAL" -gt 0 ] && mpc -p 6600 play || true
 echo "Playback started."
 
