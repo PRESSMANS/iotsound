@@ -1,5 +1,4 @@
 #!/bin/bash
-set -e
 
 if [[ -n "$SOUND_DISABLE_MPD" ]]; then
   echo "MPD is disabled, exiting..."
@@ -9,7 +8,6 @@ fi
 USB_MOUNT="/mnt/usb"
 USB_SRC_DIR="Music"
 USB_DST="/music/usb"
-USB_SYNCED=0
 
 echo "--- MPD Container Starting ---"
 
@@ -27,9 +25,21 @@ sync_usb() {
     local dev="$1"
     echo "USB detected: $dev"
 
+    # パーティション付きデバイスのみ処理（sda1, sdb1 など）
+    if [[ "$dev" != *[0-9] ]]; then
+        echo "Skipping non-partition device: $dev"
+        return 1
+    fi
+
+    # 既にマウント済みなら何もしない
+    if mountpoint -q "$USB_MOUNT" 2>/dev/null; then
+        echo "USB already mounted, skipping"
+        return 0
+    fi
+
     mount -t exfat "$dev" "$USB_MOUNT" -o uid=0,gid=0 2>/dev/null \
         || mount "$dev" "$USB_MOUNT" 2>/dev/null \
-        || { echo "USB mount failed"; return 1; }
+        || { echo "USB mount failed for $dev"; return 1; }
     echo "USB mounted at $USB_MOUNT"
 
     if [ -d "$USB_MOUNT/$USB_SRC_DIR" ]; then
@@ -39,23 +49,22 @@ sync_usb() {
             --exclude='.DS_Store' \
             --exclude='.Spotlight-V100' \
             --exclude='.Trashes' \
-            "$USB_MOUNT/$USB_SRC_DIR/" "$USB_DST/"
+            "$USB_MOUNT/$USB_SRC_DIR/" "$USB_DST/" || true
         echo "Sync complete"
     else
         echo "Directory $USB_SRC_DIR not found on USB"
     fi
 
-    umount "$USB_MOUNT" && echo "USB unmounted safely"
-    USB_SYNCED=1
+    umount "$USB_MOUNT" 2>/dev/null && echo "USB unmounted safely" || true
 
     sleep 2
-    mpc -p 6600 update --wait
-    mpc -p 6600 clear
-    mpc -p 6600 listall | mpc -p 6600 add
+    mpc -p 6600 update --wait || true
+    mpc -p 6600 clear || true
+    mpc -p 6600 listall | mpc -p 6600 add || true
     TOTAL=$(mpc -p 6600 playlist | wc -l)
-    mpc -p 6600 repeat on
-    mpc -p 6600 random off
-    [ "$TOTAL" -gt 0 ] && mpc -p 6600 play 1
+    mpc -p 6600 repeat on || true
+    mpc -p 6600 random off || true
+    [ "$TOTAL" -gt 0 ] && mpc -p 6600 play 1 || true
     echo "Playlist updated. Total: $TOTAL tracks"
 }
 
@@ -63,17 +72,17 @@ usb_watch() {
     echo "Watching for USB devices..."
     local last_dev=""
     while true; do
-        for dev in /dev/sda1 /dev/sda; do
+        # sda1, sdb1 などパーティションのみ対象
+        for dev in /dev/sd?1; do
             if [ -b "$dev" ] && [ "$dev" != "$last_dev" ]; then
                 sleep 2
-                sync_usb "$dev"
-                last_dev="$dev"
+                sync_usb "$dev" && last_dev="$dev"
                 break
             fi
         done
         # デバイスが消えたらリセット
         if [ -n "$last_dev" ] && [ ! -b "$last_dev" ]; then
-            echo "USB removed"
+            echo "USB removed: $last_dev"
             last_dev=""
         fi
         sleep 10
@@ -82,11 +91,11 @@ usb_watch() {
 
 # MPD 起動
 echo "Starting MPD..."
-mpd /etc/mpd.conf
+mpd /etc/mpd.conf || true
 sleep 5
 
 # 起動時に既存の USB デバイスをチェック
-for dev in /dev/sda1 /dev/sda; do
+for dev in /dev/sda1 /dev/sdb1; do
     if [ -b "$dev" ]; then
         echo "USB device found at boot: $dev"
         sync_usb "$dev"
@@ -96,20 +105,21 @@ done
 
 # DB 更新・プレイリスト構築
 echo "Updating music database..."
-mpc -p 6600 update --wait
+mpc -p 6600 update --wait || true
 
 echo "Building playlist..."
-mpc -p 6600 clear
-mpc -p 6600 listall | mpc -p 6600 add
+mpc -p 6600 clear || true
+mpc -p 6600 listall | mpc -p 6600 add || true
 TOTAL=$(mpc -p 6600 playlist | wc -l)
 echo "Total tracks: $TOTAL"
 
-mpc -p 6600 repeat on
-mpc -p 6600 random off
-[ "$TOTAL" -gt 0 ] && mpc -p 6600 play
+mpc -p 6600 repeat on || true
+mpc -p 6600 random off || true
+[ "$TOTAL" -gt 0 ] && mpc -p 6600 play || true
 echo "Playback started."
 
 # USB 監視をバックグラウンドで
 usb_watch &
 
+# メインプロセスを維持
 wait
