@@ -6,6 +6,7 @@ RUN apt-get update && apt-get install -y \
     python3-dev \
     libgpiod2 \
     fonts-dejavu-core \
+    fonts-noto-cjk \
     libjpeg-dev \
     zlib1g-dev \
     libfreetype6-dev \
@@ -21,5 +22,4 @@ RUN pip install --no-cache-dir \
 
 WORKDIR /app
 COPY app.py .
-
 CMD ["python", "-u", "app.py"]

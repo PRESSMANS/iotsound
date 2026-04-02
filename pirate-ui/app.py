@@ -10,6 +10,7 @@ from PIL import Image, ImageDraw, ImageFont
 import requests
 import socket
 import time
+import datetime
 import logging
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
@@ -24,20 +25,36 @@ disp = ST7789.ST7789(
     rotation=90, port=0, cs=1, dc=9,
     backlight=13, spi_speed_hz=80 * 1000 * 1000
 )
-W, H = disp.width, disp.height
+W, H = disp.width, disp.height  # 240 x 240
 
 FOOTER_H  = 22
 CONTENT_H = H - FOOTER_H
 
-try:
-    FONT_L      = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf', 22)
-    FONT_M      = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 18)
-    FONT_S      = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 14)
-    FONT_SB     = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf', 14)
-    FONT_TITLE  = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf', 18)
-    FONT_ARTIST = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 16)
-except IOError:
-    FONT_L = FONT_M = FONT_S = FONT_SB = FONT_TITLE = FONT_ARTIST = ImageFont.load_default()
+# フォント（日本語対応）
+NOTO = '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc'
+DEJA_BOLD = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
+DEJA      = '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'
+DEJA_SB   = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
+
+def load_font(path, size, fallback=None):
+    try:
+        return ImageFont.truetype(path, size)
+    except IOError:
+        if fallback:
+            try:
+                return ImageFont.truetype(fallback, size)
+            except IOError:
+                pass
+        return ImageFont.load_default()
+
+FONT_DATE   = load_font(DEJA_BOLD, 16)
+FONT_TIME   = load_font(DEJA_BOLD, 28)
+FONT_IP     = load_font(DEJA, 13)
+FONT_STATUS = load_font(DEJA, 16)
+FONT_TITLE  = load_font(NOTO, 16, DEJA_BOLD)
+FONT_ARTIST = load_font(NOTO, 14, DEJA)
+FONT_S      = load_font(DEJA, 13)
+FONT_SB     = load_font(DEJA_SB, 13)
 
 BLACK     = (0,   0,   0)
 WHITE     = (255, 255, 255)
@@ -64,18 +81,16 @@ def get_local_ip() -> str:
 
 
 def get_mpd_current_song() -> dict:
-    """MPD から現在の再生情報を取得"""
     result = {'title': None, 'artist': None, 'filename': None}
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.settimeout(3)
         s.connect((SERVER_HOST, MPD_PORT))
-        s.recv(256)  # OK MPD x.x.x
+        s.recv(256)
         s.send(b'currentsong\n')
         data = s.recv(4096).decode('utf-8', errors='replace')
         s.send(b'close\n')
         s.close()
-
         for line in data.splitlines():
             if ':' in line:
                 key, _, val = line.partition(':')
@@ -96,7 +111,6 @@ def get_snapcast_status() -> dict:
     result = {
         'server_reachable': False,
         'self_connected': False,
-        'client_count': 0,
         'title': None,
         'artist': None,
         'filename': None,
@@ -109,24 +123,19 @@ def get_snapcast_status() -> dict:
         )
         data = resp.json()
         result['server_reachable'] = True
-
         groups = data.get('result', {}).get('server', {}).get('groups', [])
         all_clients = [c for g in groups for c in g.get('clients', [])]
-        result['client_count'] = sum(1 for c in all_clients if c.get('connected'))
-
         local_ip = get_local_ip()
         for c in all_clients:
             host = c.get('host', {})
             if host.get('name') == DEVICE_NAME or host.get('ip') == local_ip:
                 result['self_connected'] = c.get('connected', False)
                 break
-
     except requests.exceptions.ConnectionError:
         log.warning('Snapcast server not reachable: %s', SERVER_HOST)
     except Exception as e:
         log.warning('Snapcast API error: %s', e)
 
-    # MPD からメタデータ取得
     if result['server_reachable']:
         mpd_info = get_mpd_current_song()
         result.update(mpd_info)
@@ -150,7 +159,7 @@ class Scroller:
             self._offset = 0
             self._pause = 30
 
-    def draw_scrolled(self, draw: ImageDraw, font, y: int, color, margin=8):
+    def draw_scrolled(self, draw, font, y, color, margin=8):
         text_area = W - margin * 2
         if self._text_w <= text_area:
             draw.text((margin, y), self._text, font=font, fill=color)
@@ -175,58 +184,75 @@ def draw_screen(status: dict, ip: str):
     img  = Image.new('RGB', (W, H), BLACK)
     draw = ImageDraw.Draw(img)
 
-    # ヘッダー
-    draw.rectangle([(0, 0), (W, 34)], fill=(30, 30, 60))
-    draw.text((8, 6), DEVICE_NAME, font=FONT_L, fill=WHITE)
+    now = datetime.datetime.now()
+    # AM/PM 形式
+    hour = now.hour
+    ampm = 'am' if hour < 12 else 'pm'
+    hour12 = hour % 12 or 12
+    date_str = now.strftime('%Y-%m-%d')
+    time_str = f'{ampm} {hour12:02d}:{now.strftime("%M")}'
 
-    y = 44
+    y = 4
 
-    # サーバー到達性
+    # 日付（小さめ）
+    draw.text((8, y), date_str, font=FONT_DATE, fill=GRAY)
+    y += 20
+
+    # 時刻（大きめ）
+    draw.text((8, y), time_str, font=FONT_TIME, fill=WHITE)
+    y += 36
+
+    # 区切り線
+    draw.line([(0, y), (W, y)], fill=(40, 40, 60), width=1)
+    y += 6
+
+    # サーバーIP と 自身のIP
+    draw.text((8, y), f'Server: {SERVER_HOST}', font=FONT_IP, fill=GRAY)
+    y += 18
+    draw.text((8, y), f'IP: {ip}', font=FONT_IP, fill=CYAN)
+    y += 18
+
+    # 区切り線
+    draw.line([(0, y), (W, y)], fill=(40, 40, 60), width=1)
+    y += 6
+
+    # サーバー到達性・接続状態
     if status['server_reachable']:
         dot_color, label = GREEN, 'Server: OK'
     else:
         dot_color, label = RED, 'Server: unreachable'
-    draw.ellipse([(8, y+2), (22, y+16)], fill=dot_color)
-    draw.text((30, y), label, font=FONT_M, fill=dot_color)
-    y += 28
+    draw.ellipse([(8, y+2), (20, y+14)], fill=dot_color)
+    draw.text((26, y), label, font=FONT_STATUS, fill=dot_color)
+    y += 22
 
-    # 接続状態
     if status['server_reachable']:
         if status['self_connected']:
             sc, sl = GREEN, 'Connected'
         else:
             sc, sl = YELLOW, 'Disconnected'
-        draw.ellipse([(8, y+2), (22, y+16)], fill=sc)
-        draw.text((30, y), sl, font=FONT_M, fill=sc)
-    y += 28
-
-    # クライアント数
-    draw.text((8, y), f'Clients: {status["client_count"]}', font=FONT_M, fill=GRAY)
-    y += 32
+        draw.ellipse([(8, y+2), (20, y+14)], fill=sc)
+        draw.text((26, y), sl, font=FONT_STATUS, fill=sc)
+    y += 22
 
     # 区切り線
-    draw.line([(8, y), (W-8, y)], fill=(60, 60, 80), width=1)
-    y += 10
+    draw.line([(0, y), (W, y)], fill=(40, 40, 60), width=1)
+    y += 6
 
-    # 曲名・アーティスト（スクロール）
-    title  = status.get('title')
-    artist = status.get('artist')
-    fname  = status.get('filename')
+    # 曲名・アーティスト（スクロール）Powered by の直上
+    title   = status.get('title')
+    artist  = status.get('artist')
+    fname   = status.get('filename')
 
     display_title  = title or fname or '-- No track info --'
     display_artist = artist or ''
 
     title_scroller.set_text(display_title, draw, FONT_TITLE)
     artist_scroller.set_text(display_artist, draw, FONT_ARTIST)
-    title_scroller.draw_scrolled(draw, FONT_TITLE, y, TITLE_COLOR)
-    y += 26
-    artist_scroller.draw_scrolled(draw, FONT_ARTIST, y, ARTIST_COLOR)
 
-    # サーバーホスト・IP（下部）
-    y = CONTENT_H - 38
-    draw.text((8, y), f'{SERVER_HOST}', font=FONT_S, fill=GRAY)
-    y += 18
-    draw.text((8, y), f'IP: {ip}', font=FONT_S, fill=CYAN)
+    # Powered by の直上に配置（下から逆算）
+    track_y = CONTENT_H - 42
+    title_scroller.draw_scrolled(draw, FONT_TITLE, track_y, TITLE_COLOR)
+    artist_scroller.draw_scrolled(draw, FONT_ARTIST, track_y + 20, ARTIST_COLOR)
 
     # フッター
     draw.rectangle([(0, CONTENT_H), (W, H)], fill=FOOTER_BG)
@@ -246,7 +272,7 @@ def draw_screen(status: dict, ip: str):
 def show_boot_screen():
     img  = Image.new('RGB', (W, H), (20, 20, 40))
     draw = ImageDraw.Draw(img)
-    draw.text((W//2 - 60, H//2 - 20), 'Starting...', font=FONT_L, fill=WHITE)
+    draw.text((W//2 - 60, H//2 - 20), 'Starting...', font=FONT_TIME, fill=WHITE)
     draw.text((8, H - 24), DEVICE_NAME, font=FONT_S, fill=GRAY)
     disp.display(img)
 
@@ -261,7 +287,6 @@ if __name__ == '__main__':
     status = {
         'server_reachable': False,
         'self_connected': False,
-        'client_count': 0,
         'title': None,
         'artist': None,
         'filename': None,
