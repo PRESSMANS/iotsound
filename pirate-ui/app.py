@@ -18,21 +18,22 @@ log = logging.getLogger(__name__)
 SERVER_HOST   = os.getenv('SERVER_HOST',   'master1.local')
 DEVICE_NAME   = os.getenv('DEVICE_NAME',   'satelite01')
 POLL_INTERVAL = int(os.getenv('POLL_INTERVAL', '5'))
+MPD_PORT      = int(os.getenv('MPD_PORT', '6600'))
 
 disp = ST7789.ST7789(
     rotation=90, port=0, cs=1, dc=9,
     backlight=13, spi_speed_hz=80 * 1000 * 1000
 )
-W, H = disp.width, disp.height  # 240 x 240
+W, H = disp.width, disp.height
 
 FOOTER_H  = 22
 CONTENT_H = H - FOOTER_H
 
 try:
-    FONT_L  = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf', 22)
-    FONT_M  = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 18)
-    FONT_S  = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 14)
-    FONT_SB = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf', 14)
+    FONT_L      = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf', 22)
+    FONT_M      = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 18)
+    FONT_S      = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 14)
+    FONT_SB     = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf', 14)
     FONT_TITLE  = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf', 18)
     FONT_ARTIST = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 16)
 except IOError:
@@ -60,6 +61,35 @@ def get_local_ip() -> str:
         return ip
     except Exception:
         return 'no network'
+
+
+def get_mpd_current_song() -> dict:
+    """MPD から現在の再生情報を取得"""
+    result = {'title': None, 'artist': None, 'filename': None}
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(3)
+        s.connect((SERVER_HOST, MPD_PORT))
+        s.recv(256)  # OK MPD x.x.x
+        s.send(b'currentsong\n')
+        data = s.recv(4096).decode('utf-8', errors='replace')
+        s.send(b'close\n')
+        s.close()
+
+        for line in data.splitlines():
+            if ':' in line:
+                key, _, val = line.partition(':')
+                key = key.strip().lower()
+                val = val.strip()
+                if key == 'title':
+                    result['title'] = val
+                elif key == 'artist':
+                    result['artist'] = val
+                elif key == 'file':
+                    result['filename'] = os.path.basename(val)
+    except Exception as e:
+        log.debug('MPD error: %s', e)
+    return result
 
 
 def get_snapcast_status() -> dict:
@@ -91,26 +121,20 @@ def get_snapcast_status() -> dict:
                 result['self_connected'] = c.get('connected', False)
                 break
 
-        # 再生中のストリーム情報を取得
-        streams = data.get('result', {}).get('server', {}).get('streams', [])
-        for stream in streams:
-            meta = stream.get('meta', {})
-            if meta:
-                result['title']    = meta.get('title') or meta.get('TITLE')
-                result['artist']   = meta.get('artist') or meta.get('ARTIST')
-                result['filename'] = meta.get('filename') or meta.get('FILENAME')
-                break
-
     except requests.exceptions.ConnectionError:
         log.warning('Snapcast server not reachable: %s', SERVER_HOST)
     except Exception as e:
         log.warning('Snapcast API error: %s', e)
 
+    # MPD からメタデータ取得
+    if result['server_reachable']:
+        mpd_info = get_mpd_current_song()
+        result.update(mpd_info)
+
     return result
 
 
 class Scroller:
-    """テキストが画面幅を超える場合に右から左へスクロール"""
     def __init__(self, speed=2):
         self.speed = speed
         self._text = ''
@@ -124,28 +148,23 @@ class Scroller:
             bbox = draw.textbbox((0, 0), text, font=font)
             self._text_w = bbox[2] - bbox[0]
             self._offset = 0
-            self._pause = 20  # 最初は静止
+            self._pause = 30
 
     def draw_scrolled(self, draw: ImageDraw, font, y: int, color, margin=8):
         text_area = W - margin * 2
         if self._text_w <= text_area:
-            # 収まる場合はそのまま表示
             draw.text((margin, y), self._text, font=font, fill=color)
             return
-
         if self._pause > 0:
             self._pause -= 1
             draw.text((margin, y), self._text, font=font, fill=color)
             return
-
-        # スクロール
         x = margin - self._offset
         draw.text((x, y), self._text, font=font, fill=color)
         self._offset += self.speed
-        # テキストが完全に左に出たらリセット
         if self._offset > self._text_w + text_area:
             self._offset = 0
-            self._pause = 20
+            self._pause = 30
 
 
 title_scroller  = Scroller(speed=2)
@@ -156,13 +175,13 @@ def draw_screen(status: dict, ip: str):
     img  = Image.new('RGB', (W, H), BLACK)
     draw = ImageDraw.Draw(img)
 
-    # ---- ヘッダー ----
+    # ヘッダー
     draw.rectangle([(0, 0), (W, 34)], fill=(30, 30, 60))
     draw.text((8, 6), DEVICE_NAME, font=FONT_L, fill=WHITE)
 
     y = 44
 
-    # ---- サーバー到達性 ----
+    # サーバー到達性
     if status['server_reachable']:
         dot_color, label = GREEN, 'Server: OK'
     else:
@@ -171,7 +190,7 @@ def draw_screen(status: dict, ip: str):
     draw.text((30, y), label, font=FONT_M, fill=dot_color)
     y += 28
 
-    # ---- 接続状態 ----
+    # 接続状態
     if status['server_reachable']:
         if status['self_connected']:
             sc, sl = GREEN, 'Connected'
@@ -181,51 +200,35 @@ def draw_screen(status: dict, ip: str):
         draw.text((30, y), sl, font=FONT_M, fill=sc)
     y += 28
 
-    # ---- クライアント数 ----
+    # クライアント数
     draw.text((8, y), f'Clients: {status["client_count"]}', font=FONT_M, fill=GRAY)
-    y += 28
+    y += 32
 
-    # ---- 区切り線 ----
+    # 区切り線
     draw.line([(8, y), (W-8, y)], fill=(60, 60, 80), width=1)
-    y += 8
+    y += 10
 
-    # ---- 曲名・アーティスト名（スクロール） ----
+    # 曲名・アーティスト（スクロール）
     title  = status.get('title')
     artist = status.get('artist')
     fname  = status.get('filename')
 
-    if title:
-        display_title = title
-    elif fname:
-        display_title = os.path.basename(fname)
-    else:
-        display_title = '-- No track info --'
-
+    display_title  = title or fname or '-- No track info --'
     display_artist = artist or ''
 
-    # クリッピング領域を設定してスクロール描画
     title_scroller.set_text(display_title, draw, FONT_TITLE)
     artist_scroller.set_text(display_artist, draw, FONT_ARTIST)
-
-    # クリップ用マスク（テキストがはみ出ないよう）
-    clip_img  = Image.new('RGB', (W, H), BLACK)
-    clip_draw = ImageDraw.Draw(clip_img)
-
-    title_scroller.draw_scrolled(clip_draw, FONT_TITLE, y, TITLE_COLOR)
+    title_scroller.draw_scrolled(draw, FONT_TITLE, y, TITLE_COLOR)
     y += 26
-    artist_scroller.draw_scrolled(clip_draw, FONT_ARTIST, y, ARTIST_COLOR)
-    y += 24
+    artist_scroller.draw_scrolled(draw, FONT_ARTIST, y, ARTIST_COLOR)
 
-    # メイン画像にコンテンツ領域を合成
-    img.paste(clip_img.crop((0, 100, W, y+10)), (0, 100))
-
-    # ---- サーバーホスト・IP ----
+    # サーバーホスト・IP（下部）
     y = CONTENT_H - 38
     draw.text((8, y), f'{SERVER_HOST}', font=FONT_S, fill=GRAY)
     y += 18
     draw.text((8, y), f'IP: {ip}', font=FONT_S, fill=CYAN)
 
-    # ---- フッター ----
+    # フッター
     draw.rectangle([(0, CONTENT_H), (W, H)], fill=FOOTER_BG)
     text1 = 'Powered by '
     text2 = 'PRESSMANS'
@@ -254,10 +257,6 @@ if __name__ == '__main__':
     time.sleep(2)
 
     ip = get_local_ip()
-
-    # スクロールのためにポーリング間隔を短くする
-    SCROLL_INTERVAL = 0.1  # 100ms ごとに再描画
-
     last_status_time = 0
     status = {
         'server_reachable': False,
@@ -271,15 +270,12 @@ if __name__ == '__main__':
     while True:
         try:
             now = time.time()
-            # ステータス取得は POLL_INTERVAL ごと
             if now - last_status_time >= POLL_INTERVAL:
                 status = get_snapcast_status()
                 ip = get_local_ip()
                 last_status_time = now
                 log.info('status=%s ip=%s', status, ip)
-
             draw_screen(status, ip)
         except Exception as e:
             log.error('Unexpected error: %s', e)
-
-        time.sleep(SCROLL_INTERVAL)
+        time.sleep(0.1)
