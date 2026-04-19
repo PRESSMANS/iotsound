@@ -31,7 +31,7 @@ if [[ "$MODE" == "MULTI_ROOM" || "$MODE" == "MULTI_ROOM_CLIENT" ]]; then
     --host $SNAPSERVER \
     --latency $LATENCY \
     --hostID $SNAPCAST_CLIENT_ID \
-    --player pulse \
+    --player alsa \
     --reconnect \
     --logfilter *:error
 else
